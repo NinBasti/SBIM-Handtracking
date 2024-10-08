@@ -13,11 +13,11 @@ hands = mp_hands.Hands(
     max_num_hands=1,
     min_detection_confidence=0.35,
     min_tracking_confidence=0.35,
-    model_complexity=0
+    model_complexity=1
 )
 
 # Set up the webcam
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 ret, frame = cap.read()
 if not ret:
     print("Failed to capture video")
