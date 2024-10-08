@@ -4,7 +4,7 @@ import numpy as np
 import pyautogui
 import time
 import threading
-import keyboard
+from pynput import keyboard
 
 # Initialize MediaPipe hands module
 mp_hands = mp.solutions.hands
@@ -13,11 +13,11 @@ hands = mp_hands.Hands(
     max_num_hands=1,
     min_detection_confidence=0.35,
     min_tracking_confidence=0.35,
-    model_complexity=1
+    model_complexity=0
 )
 
 # Set up the webcam
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 ret, frame = cap.read()
 if not ret:
     print("Failed to capture video")
@@ -33,20 +33,17 @@ screen_width, screen_height = pyautogui.size()
 # Define the portion of the camera view to map to the full screen (70% here)
 inner_area_percent = 0.7
 
-
 # Calculate the margins around the inner area
 def calculate_margins(frame_width, frame_height, inner_area_percent):
     margin_width = frame_width * (1 - inner_area_percent) / 2
     margin_height = frame_height * (1 - inner_area_percent) / 2
     return margin_width, margin_height
 
-
 # Convert video coordinates to screen coordinates
 def convert_to_screen_coordinates(x, y, frame_width, frame_height, margin_width, margin_height):
     screen_x = np.interp(x, (margin_width, frame_width - margin_width), (0, screen_width))
     screen_y = np.interp(y, (margin_height, frame_height - margin_height), (0, screen_height))
     return screen_x, screen_y
-
 
 # Movement Thread for smoother cursor movement
 class CursorMovementThread(threading.Thread):
@@ -89,7 +86,6 @@ class CursorMovementThread(threading.Thread):
     def stop(self):
         self.running = False
 
-
 # Initialize the movement thread
 movement_thread = CursorMovementThread()
 movement_thread.start()
@@ -102,7 +98,6 @@ mouse_movement_enabled = True  # Tracks whether the user has enabled/disabled mo
 tracking_active = True  # Tracks the state of tracking regardless of hand detection
 tracking_lost = False  # Tracks if tracking was lost
 
-
 # Function to draw hand landmarks and connections
 def draw_landmarks(frame, hand_landmarks):
     if hand_landmarks:
@@ -112,7 +107,6 @@ def draw_landmarks(frame, hand_landmarks):
             cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)  # Draw landmark
         # Draw connections between landmarks
         mp.solutions.drawing_utils.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
 
 # Thread to handle left click toggle
 def handle_left_click():
@@ -124,19 +118,16 @@ def handle_left_click():
             pyautogui.mouseUp()
         time.sleep(0.1)  # Small delay to avoid too frequent actions
 
-
 # Start the left click thread
 click_thread = threading.Thread(target=handle_left_click)
 click_thread.daemon = True
 click_thread.start()
-
 
 # Toggle function for the left click
 def toggle_left_click():
     global left_click_enabled
     left_click_enabled = not left_click_enabled
     print(f"Left click {'enabled' if left_click_enabled else 'disabled'}")
-
 
 # Toggle function for mouse movement
 def toggle_mouse_movement():
@@ -150,12 +141,19 @@ def toggle_mouse_movement():
     elif tracking_active:  # Reactivate only if tracking is active
         movement_thread.activate()
 
+# Function to handle key press events
+def on_press(key):
+    try:
+        if key.char == 'c':
+            toggle_left_click()
+        elif key.char == 't':
+            toggle_mouse_movement()
+    except AttributeError:
+        pass
 
-# Set up hotkey listener for 'c' to toggle click on and off
-keyboard.add_hotkey('c', toggle_left_click)
-
-# Set up hotkey listener for 't' to toggle mouse movement on and off
-keyboard.add_hotkey('t', toggle_mouse_movement)
+# Set up the listener for keyboard events
+listener = keyboard.Listener(on_press=on_press)
+listener.start()
 
 try:
     while True:
