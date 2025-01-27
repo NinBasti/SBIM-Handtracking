@@ -6,6 +6,8 @@ import time
 import threading
 from pynput import keyboard
 
+pyautogui_lock = threading.Lock()
+
 # Initialize MediaPipe hands module
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
@@ -63,17 +65,17 @@ class CursorMovementThread(threading.Thread):
                 distance = np.hypot(self.target_x - self.current_x, self.target_y - self.current_y)
                 screen_diagonal = np.hypot(screen_width, screen_height)
                 if distance / screen_diagonal > self.jitter_threshold:
-                    step = max(0.0001, distance * self.smooth_transition_speed)  # Smooth transition speed
+                    step = max(0.0001, distance * self.smooth_transition_speed)
                     if distance != 0:
                         step_x = (self.target_x - self.current_x) / distance * step
                         step_y = (self.target_y - self.current_y) / distance * step
                         self.current_x += step_x
                         self.current_y += step_y
-                        pyautogui.moveTo(self.current_x, self.current_y, _pause=False)
-                time.sleep(0)
+                        with pyautogui_lock:
+                            pyautogui.moveTo(self.current_x, self.current_y, _pause=False)
+                time.sleep(0.01)
             else:
                 time.sleep(0.1)
-
     def update_target(self, x, y):
         self.target_x, self.target_y = x, y
 
