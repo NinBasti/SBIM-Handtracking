@@ -113,12 +113,18 @@ def draw_landmarks(frame, hand_landmarks):
 # Thread to handle left click toggle
 def handle_left_click():
     global left_click_enabled
+    is_pressed = False  # Tracks the current state of the mouse button
     while True:
-        if left_click_enabled:
-            pyautogui.mouseDown()
-        else:
-            pyautogui.mouseUp()
-        time.sleep(0.1)  # Small delay to avoid too frequent actions
+        if left_click_enabled and not is_pressed:
+            with pyautogui_lock:
+                pyautogui.mouseDown()  # Press and hold the left mouse button
+            is_pressed = True  # Update the state
+        elif not left_click_enabled and is_pressed:
+            with pyautogui_lock:
+                pyautogui.mouseUp()  # Release the left mouse button
+            is_pressed = False  # Update the state
+        time.sleep(0.1)  # Avoid excessive looping
+
 
 # Start the left click thread
 click_thread = threading.Thread(target=handle_left_click)
