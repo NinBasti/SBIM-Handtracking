@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import urllib.request
+import atexit
 
 import cv2
 import mediapipe as mp
@@ -52,8 +53,6 @@ pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
 
 screen_width, screen_height = pyautogui.size()
-
-# Portion of the camera view mapped to the full screen
 inner_area_percent = 0.7
 
 
@@ -67,6 +66,14 @@ def convert_to_screen_coordinates(x, y, frame_width, frame_height, margin_width,
     screen_x = np.interp(x, (margin_width, frame_width - margin_width), (0, screen_width))
     screen_y = np.interp(y, (margin_height, frame_height - margin_height), (0, screen_height))
     return screen_x, screen_y
+
+
+def release_mouse():
+    with pyautogui_lock:
+        pyautogui.mouseUp()
+
+
+atexit.register(release_mouse)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +157,7 @@ def handle_left_click():
             with pyautogui_lock:
                 pyautogui.mouseUp()
             is_pressed = False
-        time.sleep(0.1)
+        time.sleep(0.05)
 
 
 click_thread = threading.Thread(target=handle_left_click)
@@ -161,6 +168,9 @@ click_thread.start()
 def toggle_left_click():
     global left_click_enabled
     left_click_enabled = not left_click_enabled
+    if not left_click_enabled:
+        with pyautogui_lock:
+            pyautogui.mouseUp()
     print(f"Left click {'enabled' if left_click_enabled else 'disabled'}")
 
 
@@ -177,11 +187,11 @@ def toggle_mouse_movement():
 
 def on_press(key):
     try:
-        if key.char == 'c':
+        if hasattr(key, 'char') and key.char == 'c':
             toggle_left_click()
-        elif key.char == 't':
+        elif hasattr(key, 'char') and key.char == 't':
             toggle_mouse_movement()
-    except AttributeError:
+    except Exception as e:
         pass
 
 
@@ -199,7 +209,6 @@ try:
         if not ret:
             continue
 
-        # Mirror
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -244,6 +253,7 @@ try:
             break
 
 finally:
+    release_mouse()
     movement_thread.stop()
     landmarker.close()
     cap.release()
