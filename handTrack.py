@@ -1,53 +1,77 @@
+import os
+import time
+import threading
+import urllib.request
+
 import cv2
 import mediapipe as mp
 import numpy as np
 import pyautogui
-import time
-import threading
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision
 from pynput import keyboard
 
 pyautogui_lock = threading.Lock()
 
-# Initialize MediaPipe hands module
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
-    static_image_mode=False,
-    max_num_hands=1,
-    min_detection_confidence=0.35,
-    min_tracking_confidence=0.35,
-    model_complexity=1
-)
+MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/"
+             "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
 
-# Set up the webcam
+if not os.path.exists(MODEL_PATH):
+    print("Downloading hand_landmarker.task ...")
+    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+
+options = vision.HandLandmarkerOptions(
+    base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
+    running_mode=vision.RunningMode.VIDEO,
+    num_hands=1,
+    min_hand_detection_confidence=0.35,
+    min_hand_presence_confidence=0.35,
+    min_tracking_confidence=0.35,
+)
+landmarker = vision.HandLandmarker.create_from_options(options)
+
+RING_FINGER_MCP = 13
+
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),          # index
+    (5, 9), (9, 10), (10, 11), (11, 12),     # middle
+    (9, 13), (13, 14), (14, 15), (15, 16),   # ring
+    (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
+    (0, 17),                                 # palm edge
+]
+
 cap = cv2.VideoCapture(0)
 ret, frame = cap.read()
 if not ret:
     print("Failed to capture video")
     exit(1)
 
-# Configure PyAutoGUI
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
 
-# Get screen size
 screen_width, screen_height = pyautogui.size()
 
-# Define the portion of the camera view to map to the full screen (70% here)
+# Portion of the camera view mapped to the full screen
 inner_area_percent = 0.7
 
-# Calculate the margins around the inner area
+
 def calculate_margins(frame_width, frame_height, inner_area_percent):
     margin_width = frame_width * (1 - inner_area_percent) / 2
     margin_height = frame_height * (1 - inner_area_percent) / 2
     return margin_width, margin_height
 
-# Convert video coordinates to screen coordinates
+
 def convert_to_screen_coordinates(x, y, frame_width, frame_height, margin_width, margin_height):
     screen_x = np.interp(x, (margin_width, frame_width - margin_width), (0, screen_width))
     screen_y = np.interp(y, (margin_height, frame_height - margin_height), (0, screen_height))
     return screen_x, screen_y
 
-# Movement Thread for smoother cursor movement
+
+# ---------------------------------------------------------------------------
+# Cursor movement thread
+# ---------------------------------------------------------------------------
 class CursorMovementThread(threading.Thread):
     def __init__(self):
         super().__init__()
@@ -55,7 +79,7 @@ class CursorMovementThread(threading.Thread):
         self.current_x, self.current_y = pyautogui.position()
         self.target_x, self.target_y = self.current_x, self.current_y
         self.running = True
-        self.active = False  # Mouse movement initially inactive
+        self.active = False
         self.jitter_threshold = 0.003
         self.smooth_transition_speed = 0.2
 
@@ -76,6 +100,7 @@ class CursorMovementThread(threading.Thread):
                 time.sleep(0.01)
             else:
                 time.sleep(0.1)
+
     def update_target(self, x, y):
         self.target_x, self.target_y = x, y
 
@@ -88,68 +113,68 @@ class CursorMovementThread(threading.Thread):
     def stop(self):
         self.running = False
 
-# Initialize the movement thread
+
 movement_thread = CursorMovementThread()
 movement_thread.start()
 
-# Variable to track whether left click is toggled on or off
 left_click_enabled = False
+mouse_movement_enabled = True
+tracking_active = True
+tracking_lost = False
 
-# Variable to track whether mouse movement is enabled or disabled
-mouse_movement_enabled = True  # Tracks whether the user has enabled/disabled movement
-tracking_active = True  # Tracks the state of tracking regardless of hand detection
-tracking_lost = False  # Tracks if tracking was lost
 
-# Function to draw hand landmarks and connections
-def draw_landmarks(frame, hand_landmarks):
-    if hand_landmarks:
-        for landmark in hand_landmarks.landmark:
-            h, w, _ = frame.shape
-            cx, cy = int(landmark.x * w), int(landmark.y * h)
-            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)  # Draw landmark
-        # Draw connections between landmarks
-        mp.solutions.drawing_utils.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+# ---------------------------------------------------------------------------
+# Drawing
+# ---------------------------------------------------------------------------
+def draw_landmarks(frame, landmarks):
+    h, w, _ = frame.shape
+    points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
+    for a, b in HAND_CONNECTIONS:
+        cv2.line(frame, points[a], points[b], (255, 255, 255), 2)
+    for p in points:
+        cv2.circle(frame, p, 5, (0, 255, 0), -1)
 
-# Thread to handle left click toggle
+
+# ---------------------------------------------------------------------------
+# Click handling
+# ---------------------------------------------------------------------------
 def handle_left_click():
     global left_click_enabled
-    is_pressed = False  # Tracks the current state of the mouse button
+    is_pressed = False
     while True:
         if left_click_enabled and not is_pressed:
             with pyautogui_lock:
-                pyautogui.mouseDown()  # Press and hold the left mouse button
-            is_pressed = True  # Update the state
+                pyautogui.mouseDown()
+            is_pressed = True
         elif not left_click_enabled and is_pressed:
             with pyautogui_lock:
-                pyautogui.mouseUp()  # Release the left mouse button
-            is_pressed = False  # Update the state
-        time.sleep(0.1)  # Avoid excessive looping
+                pyautogui.mouseUp()
+            is_pressed = False
+        time.sleep(0.1)
 
 
-# Start the left click thread
 click_thread = threading.Thread(target=handle_left_click)
 click_thread.daemon = True
 click_thread.start()
 
-# Toggle function for the left click
+
 def toggle_left_click():
     global left_click_enabled
     left_click_enabled = not left_click_enabled
     print(f"Left click {'enabled' if left_click_enabled else 'disabled'}")
 
-# Toggle function for mouse movement
+
 def toggle_mouse_movement():
     global mouse_movement_enabled, tracking_active
     mouse_movement_enabled = not mouse_movement_enabled
     print(f"Mouse movement {'enabled' if mouse_movement_enabled else 'disabled'}")
 
-    # Adjust based on the toggle, without double-toggling
     if not mouse_movement_enabled:
         movement_thread.deactivate()
-    elif tracking_active:  # Reactivate only if tracking is active
+    elif tracking_active:
         movement_thread.activate()
 
-# Function to handle key press events
+
 def on_press(key):
     try:
         if key.char == 'c':
@@ -159,64 +184,67 @@ def on_press(key):
     except AttributeError:
         pass
 
-# Set up the listener for keyboard events
+
 listener = keyboard.Listener(on_press=on_press)
 listener.start()
 
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+last_timestamp_ms = -1
+
 try:
     while True:
-        # Read a frame from the webcam
         ret, frame = cap.read()
         if not ret:
             continue
 
-        # Flip the frame horizontally for a natural selfie-view, and convert the BGR image to RGB
-        frame = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
+        # Mirror
+        frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Process the frame and find hands
-        results = hands.process(frame)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        timestamp_ms = int(time.monotonic() * 1000)
+        if timestamp_ms <= last_timestamp_ms:
+            timestamp_ms = last_timestamp_ms + 1
+        last_timestamp_ms = timestamp_ms
 
-        # Convert the frame color back so it can be displayed
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-        # Check for the presence of hands
-        if results.multi_hand_landmarks:
-            tracking_active = True  # Hand tracking is detected
-            tracking_lost = False  # Reset tracking loss
-            for hand_landmarks in results.multi_hand_landmarks:
-                # Draw landmarks and connections
+        if results.hand_landmarks:
+            tracking_active = True
+            tracking_lost = False
+            for hand_landmarks in results.hand_landmarks:
                 draw_landmarks(frame, hand_landmarks)
 
-                # Use the base of the ring finger (RING_FINGER_MCP) for tracking
-                ring_finger_mcp = hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_MCP]
+                ring_finger_mcp = hand_landmarks[RING_FINGER_MCP]
                 mcp_x = int(ring_finger_mcp.x * frame.shape[1])
                 mcp_y = int(ring_finger_mcp.y * frame.shape[0])
 
-                # Calculate margins based on the current frame size
-                margin_width, margin_height = calculate_margins(frame.shape[1], frame.shape[0], inner_area_percent)
+                margin_width, margin_height = calculate_margins(
+                    frame.shape[1], frame.shape[0], inner_area_percent)
 
-                # Convert video coordinates to screen coordinates
-                target_x, target_y = convert_to_screen_coordinates(mcp_x, mcp_y, frame.shape[1], frame.shape[0],
-                                                                   margin_width, margin_height)
+                target_x, target_y = convert_to_screen_coordinates(
+                    mcp_x, mcp_y, frame.shape[1], frame.shape[0],
+                    margin_width, margin_height)
 
-                # Update target position in movement thread if mouse movement is enabled
                 if mouse_movement_enabled:
-                    movement_thread.activate()  # Make sure movement is active
+                    movement_thread.activate()
                     movement_thread.update_target(target_x, target_y)
         else:
             if not tracking_lost:
-                tracking_lost = True  # Mark that we lost tracking
-            tracking_active = False  # No hand detected
-            if mouse_movement_enabled:  # Only deactivate if movement is supposed to be enabled
+                tracking_lost = True
+            tracking_active = False
+            if mouse_movement_enabled:
                 movement_thread.deactivate()
 
-        # Display the frame with landmarks
         cv2.imshow('Hand Tracking', frame)
 
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+        if cv2.waitKey(1) & 0xFF == 27:
             break
 
 finally:
     movement_thread.stop()
+    landmarker.close()
     cap.release()
     cv2.destroyAllWindows()
