@@ -3,6 +3,7 @@ import time
 import threading
 import urllib.request
 import atexit
+import signal
 
 import cv2
 import mediapipe as mp
@@ -10,7 +11,6 @@ import numpy as np
 import pyautogui
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
-from pynput import keyboard
 
 pyautogui_lock = threading.Lock()
 
@@ -185,18 +185,15 @@ def toggle_mouse_movement():
         movement_thread.activate()
 
 
-def on_press(key):
-    try:
-        if hasattr(key, 'char') and key.char == 'c':
-            toggle_left_click()
-        elif hasattr(key, 'char') and key.char == 't':
-            toggle_mouse_movement()
-    except Exception as e:
-        pass
+# ---------------------------------------------------------------------------
+#   SIGUSR1 -> toggle left click
+#   SIGUSR2 -> toggle mouse movement
+# ---------------------------------------------------------------------------
+signal.signal(signal.SIGUSR1, lambda *_: toggle_left_click())
+signal.signal(signal.SIGUSR2, lambda *_: toggle_mouse_movement())
 
-
-listener = keyboard.Listener(on_press=on_press)
-listener.start()
+print(f"Running (PID {os.getpid()}). Toggle click: pkill -USR1 -f '[h]and_mouse.py' | "
+      f"Toggle movement: pkill -USR2 -f '[h]and_mouse.py'")
 
 # ---------------------------------------------------------------------------
 # Main loop
