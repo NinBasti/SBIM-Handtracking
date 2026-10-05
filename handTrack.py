@@ -34,16 +34,26 @@ landmarker = vision.HandLandmarker.create_from_options(options)
 
 RING_FINGER_MCP = 13
 
+LOST_GRACE_S = 0.25
+last_seen = 0.0
+
 HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),          # index
-    (5, 9), (9, 10), (10, 11), (11, 12),     # middle
-    (9, 13), (13, 14), (14, 15), (15, 16),   # ring
+    (0, 1), (1, 2), (2, 3), (3, 4),  # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),  # index
+    (5, 9), (9, 10), (10, 11), (11, 12),  # middle
+    (9, 13), (13, 14), (14, 15), (15, 16),  # ring
     (13, 17), (17, 18), (18, 19), (19, 20),  # pinky
-    (0, 17),                                 # palm edge
+    (0, 17),  # palm edge
 ]
 
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_FPS, 30)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+cap.set(cv2.CAP_PROP_EXPOSURE, 140)
 ret, frame = cap.read()
 if not ret:
     print("Failed to capture video")
@@ -218,6 +228,7 @@ try:
         results = landmarker.detect_for_video(mp_image, timestamp_ms)
 
         if results.hand_landmarks:
+            last_seen = time.monotonic()
             tracking_active = True
             tracking_lost = False
             for hand_landmarks in results.hand_landmarks:
@@ -237,12 +248,12 @@ try:
                 if mouse_movement_enabled:
                     movement_thread.activate()
                     movement_thread.update_target(target_x, target_y)
-        else:
-            if not tracking_lost:
-                tracking_lost = True
-            tracking_active = False
-            if mouse_movement_enabled:
-                movement_thread.deactivate()
+                else:
+                    if time.monotonic() - last_seen > LOST_GRACE_S:
+                        tracking_lost = True
+                        tracking_active = False
+                        if mouse_movement_enabled:
+                            movement_thread.deactivate()
 
         cv2.imshow('Hand Tracking', frame)
 
